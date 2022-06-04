@@ -26,6 +26,7 @@ var (
 			spotifyauth.ScopeUserFollowRead,
 			spotifyauth.ScopePlaylistModifyPublic,
 			spotifyauth.ScopePlaylistModifyPrivate,
+			spotifyauth.ScopeUserLibraryRead,
 		),
 	)
 	ch    = make(chan *spotify.Client)
@@ -57,7 +58,17 @@ func main() {
 	}
 	playlistName := time.Now().Format("2006-01-02")
 	playlist := createPlaylist(client, user.ID, playlistName)
+	fmt.Printf("creating playlist: %v\n", playlistName)
 	populatePlaylist(client, playlist.ID)
+	albums, err := client.CurrentUsersAlbums(context.Background(), []spotify.RequestOption{spotify.Limit(itemsLimit)}...)
+	if err != nil {
+		log.Fatal(err)
+	}
+	simpleAlbums := []spotify.SimpleAlbum{}
+	for _, album := range albums.Albums {
+		simpleAlbums = append(simpleAlbums, album.SimpleAlbum)
+	}
+	populatePlaylistWithAlbums(client, playlist.ID, simpleAlbums...)
 }
 
 func completeAuth(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +122,7 @@ func populatePlaylist(client *spotify.Client, playlistId spotify.ID) {
 func populatePlaylistWithArtistAlbums(client *spotify.Client, playlistId, artistId spotify.ID) {
 	options := []spotify.RequestOption{spotify.Offset(0), spotify.Limit(itemsLimit)}
 	counter := 0
+	albumsSelected := []spotify.SimpleAlbum{}
 	var albumPresent = make(map[string]bool)
 	for {
 		albums, err := client.GetArtistAlbums(
@@ -135,11 +147,24 @@ func populatePlaylistWithArtistAlbums(client *spotify.Client, playlistId, artist
 			key := strings.ToLower(album.Name + releaseDate)
 			if !albumPresent[key] {
 				albumPresent[key] = true
-				fmt.Printf("    %s #%03d ID: %v, Name: %v %v\n", album.AlbumType, counter, album.ID, album.Name, releaseDate)
-				populatePlaylistWithAlbumTracks(client, playlistId, album.ID)
+				albumsSelected = append(albumsSelected, album)
 			}
 		}
 		options[0] = spotify.Offset(counter)
+	}
+	populatePlaylistWithAlbums(client, playlistId, albumsSelected...)
+}
+
+func populatePlaylistWithAlbums(client *spotify.Client, playlistId spotify.ID, albums ...spotify.SimpleAlbum) {
+	counter := 0
+	for _, album := range albums {
+		releaseYearLength := 4
+		if releaseYearLength > len(album.ReleaseDate) {
+			releaseYearLength = len(album.ReleaseDate)
+		}
+		releaseDate := album.ReleaseDate[:releaseYearLength]
+		fmt.Printf("    %s #%03d ID: %v, Name: %v %v\n", album.AlbumType, counter, album.ID, album.Name, releaseDate)
+		populatePlaylistWithAlbumTracks(client, playlistId, album.ID)
 	}
 }
 
