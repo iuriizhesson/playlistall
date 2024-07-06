@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,7 +57,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	playlistName := time.Now().Format("2006-01-02")
+	var playlistName string = time.Now().Format("2006-01-02 15:04")
 	playlist := createPlaylist(client, user.ID, playlistName)
 	fmt.Printf("creating playlist: %v\n", playlistName)
 	populatePlaylist(client, playlist.ID)
@@ -101,6 +102,7 @@ const itemsLimit = 50
 func populatePlaylist(client *spotify.Client, playlistId spotify.ID) {
 	options := []spotify.RequestOption{spotify.Limit(itemsLimit)}
 	counter := 0
+	allArtists := []spotify.FullArtist{}
 	for {
 		artists, err := client.CurrentUsersFollowedArtists(context.Background(), options...)
 		if err != nil {
@@ -109,13 +111,17 @@ func populatePlaylist(client *spotify.Client, playlistId spotify.ID) {
 		if len(artists.Artists) == 0 {
 			break
 		}
-		for _, artist := range artists.Artists {
-			counter++
-			fmt.Printf("artist #%03d ID: %v, Name: %v\n", counter, artist.ID, artist.Name)
-			populatePlaylistWithArtistAlbums(client, playlistId, artist.ID)
-		}
+		allArtists = append(allArtists, artists.Artists...)
 		last := artists.Artists[len(artists.Artists)-1].ID.String()
 		options = []spotify.RequestOption{options[0], spotify.After(last)}
+	}
+	sort.Slice(allArtists, func(i, j int) bool {
+		return allArtists[i].Name < allArtists[j].Name
+	})
+	for _, artist := range allArtists {
+		counter++
+		fmt.Printf("artist #%03d ID: %v, Name: %v\n", counter, artist.ID, artist.Name)
+		populatePlaylistWithArtistAlbums(client, playlistId, artist.ID)
 	}
 }
 
@@ -156,14 +162,14 @@ func populatePlaylistWithArtistAlbums(client *spotify.Client, playlistId, artist
 }
 
 func populatePlaylistWithAlbums(client *spotify.Client, playlistId spotify.ID, albums ...spotify.SimpleAlbum) {
-	counter := 0
+	// counter := 0
 	for _, album := range albums {
-		releaseYearLength := 4
-		if releaseYearLength > len(album.ReleaseDate) {
-			releaseYearLength = len(album.ReleaseDate)
-		}
-		releaseDate := album.ReleaseDate[:releaseYearLength]
-		fmt.Printf("    %s #%03d ID: %v, Name: %v %v\n", album.AlbumType, counter, album.ID, album.Name, releaseDate)
+		// releaseYearLength := 4
+		// if releaseYearLength > len(album.ReleaseDate) {
+		// 	releaseYearLength = len(album.ReleaseDate)
+		// }
+		// releaseDate := album.ReleaseDate[:releaseYearLength]
+		// fmt.Printf("    %s #%03d ID: %v, Name: %v %v\n", album.AlbumType, counter, album.ID, album.Name, releaseDate)
 		populatePlaylistWithAlbumTracks(client, playlistId, album.ID)
 	}
 }
@@ -175,15 +181,22 @@ func populatePlaylistWithAlbumTracks(client *spotify.Client, playlistId, albumId
 	for {
 		tracks, err := client.GetAlbumTracks(context.Background(), albumId, options...)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Printf("client.GetAlbumTracks: %+v\n", err)
+			time.Sleep(1 * time.Second)
+			continue
+			//log.Fatalf("client.GetAlbumTracks: %+v", err)
 		}
 		if len(tracks.Tracks) == 0 {
 			break
 		}
 		for _, track := range tracks.Tracks {
 			counter++
+			trackName := strings.ToLower(track.Name)
+			if strings.Contains(trackName, "mix") || strings.Contains(trackName, "rmx") {
+				fmt.Printf("track #%03d ID: %v, Name: %v\n", counter, track.ID, track.Name)
+				continue
+			}
 			albumTracks = append(albumTracks, track.ID)
-			fmt.Printf("        track #%03d ID: %v, Name: %v\n", counter, track.ID, track.Name)
 		}
 		options[0] = spotify.Offset(counter)
 	}
